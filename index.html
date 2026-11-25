@@ -459,21 +459,34 @@ function add(files){
 }
 function draw(){
   el.listCard.style.display = queue.length ? '' : 'none';
-  el.list.innerHTML = queue.map(it => {
-    const meta = it.status === 'error' ? `<span class="meta err">${esc(it.err)}</span>` : it.status === 'processing' ? '<span class="meta">처리 중…</span>' : it.status === 'done' ? '<span class="meta">완료</span>' : '<span class="meta">대기</span>';
-    const res = it.status === 'done' ? `<div class="res">
+  const ids = new Set(queue.map(q => q.id));
+  [...el.list.children].forEach(c => { if (!ids.has(+c.dataset.id)) c.remove(); });
+  queue.forEach((it, i) => {
+    if (!it.el){
+      const d = document.createElement('div');
+      d.className = 'item' + (it.fresh ? ' in' : ''); d.dataset.id = it.id; it.fresh = false;
+      d.innerHTML = `<div class="item-top"><span class="name" title="${esc(it.name)}">${esc(it.name)}</span><span class="meta"></span><button class="x" aria-label="제거">✕</button></div><div class="slot"></div>`;
+      d.querySelector('.x').onclick = () => { queue = queue.filter(q => q.id !== it.id); draw(); };
+      it.el = d; it.shown = null;
+    }
+    const meta = it.el.querySelector('.meta');
+    meta.className = 'meta' + (it.status === 'error' ? ' err' : '');
+    meta.textContent = it.status === 'error' ? it.err : it.status === 'processing' ? '처리 중…' : it.status === 'done' ? '완료' : '대기';
+    const slot = it.el.querySelector('.slot'), want = it.status === 'done' ? it.afterUrl : null;
+    if (it.shown !== want){
+      it.shown = want;
+      slot.innerHTML = want ? `<div class="res">
         <span>피크 ${db(it.before.peak)} → <em>${db(it.after.peak)} dB</em></span>
         <span>음량 ${db(it.before.rms)} → <em>${db(it.after.rms)} dB</em></span>
-        <button class="btn s" data-save="${it.id}">저장</button>
+        <button class="btn s sv">저장</button>
         <div class="players">
           <div class="pl"><span>원본</span><audio controls preload="none" src="${it.beforeUrl}"></audio></div>
           <div class="pl after"><span>처리 후</span><audio controls preload="none" src="${it.afterUrl}"></audio></div>
         </div></div>` : '';
-    return `<div class="item${it.fresh ? ' in' : ''}"><div class="item-top"><span class="name" title="${esc(it.name)}">${esc(it.name)}</span>${meta}<button class="x" data-rm="${it.id}" aria-label="제거">✕</button></div>${res}</div>`;
-  }).join('');
-  queue.forEach(q => q.fresh = false);
-  el.list.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { queue = queue.filter(q => q.id != b.dataset.rm); draw(); });
-  el.list.querySelectorAll('[data-save]').forEach(b => b.onclick = () => saveOne(+b.dataset.save));
+      const sv = slot.querySelector('.sv'); if (sv) sv.onclick = () => saveOne(it.id);
+    }
+    if (el.list.children[i] !== it.el) el.list.insertBefore(it.el, el.list.children[i] || null);
+  });
   el.go.disabled = busy || !queue.length;
   el.all.disabled = busy || !queue.some(q => q.status === 'done');
 }
@@ -558,7 +571,7 @@ let ctx = null, master = null, mvol = 1;
 const sq = v => v * v;
 function ac(){
   if (!ctx){ ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = sq(mvol); master.connect(ctx.destination); }
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
   return ctx;
 }
 // iOS/iPadOS: 첫 터치에서 오디오 잠금 해제 + 무음 스위치 무시
@@ -645,7 +658,7 @@ function updateRow(it){
   r.classList.toggle('err', it.state === 'err');
   const b = r.querySelector('.pbtn'); b.textContent = it.state === 'play' ? '■' : '▶'; b.disabled = it.state === 'load' || it.state === 'err';
   if (it.state !== 'play'){
-    r.querySelector('.tm').textContent = it.state === 'load' ? '…' : it.state === 'err' ? '열 수 없음' : fmt(it.dur);
+    r.querySelector('.tm').textContent = it.state === 'load' ? '불러오는 중' : it.state === 'err' ? '열 수 없음' : fmt(it.dur);
     r.querySelector('.bar i').style.width = '0';
   }
 }
@@ -701,6 +714,7 @@ document.addEventListener('keydown', e => {
   else if (/^[1-9]$/.test(e.key) && !e.repeat){ const it = items[+e.key - 1]; if (it){ play(it); sel = +e.key; markSel(); } }
 });
 
+document.addEventListener('keyup', e => { if (e.code === 'Space' && active()) e.preventDefault(); });
 ['dragenter','dragover'].forEach(t => window.addEventListener(t, e => { if (dragFrom >= 0 || !active()) return; e.preventDefault(); document.body.classList.add('drag'); }));
 ['dragleave','drop'].forEach(t => window.addEventListener(t, e => { if (dragFrom >= 0 || !active()) return; e.preventDefault(); document.body.classList.remove('drag'); }));
 window.addEventListener('drop', e => { if (active() && dragFrom < 0 && e.dataTransfer && e.dataTransfer.files.length) add(e.dataTransfer.files); });
